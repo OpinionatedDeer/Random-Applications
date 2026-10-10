@@ -223,3 +223,8 @@ The changing kind's runtime may only use APIs available at API 24, its `minSdkVe
 must not reference `R`, because one dex is shared by every app. `tests/test_manifest.py`
 checks the manifest rules that aapt2 doesn't check, such as fully qualified component names
 and declaration order.
+
+## License
+
+[0BSD](LICENSE) (BSD Zero Clause License): use, copy, modify and distribute for any
+purpose, with no conditions. No attribution is required.

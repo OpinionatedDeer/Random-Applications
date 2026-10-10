@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=64"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,6 +7,8 @@ name = "apkgen"
 version = "0.2.0"
 description = "Gradle-free generator for mass Android launcher test apps"
 readme = "README.md"
+license = "0BSD"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = ["Pillow>=10.1"]
 
