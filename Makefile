@@ -1,58 +1,53 @@
-# Android App Generator Makefile
+# Android test-app generator. See README.md for details.
+#
+#   make build END=500 [START=1] [DIR=apps_output] [INSTALL=1] [LAUNCH=1] [WORKERS=8]
+#   make install END=5             build and install apps 1..5
+#   make uninstall [KIND=all]      remove generated apps from the device (normal|all)
+#   make doctor                    show and check the resolved toolchain
+#   make test                      run the unit tests
+#   make clean DIR=my_apps         delete an output directory (default DIR is apps_output!)
+#
+# CONFIG=path selects a toolchain config file (default: config.local.toml).
 
-# This Makefile provides a convenient way to automate the process using the `app_generator/build_app.py` script.
-
-# ## Usage
-#
-# Run `make` with the following variables:
-#
-# - `START`: Starting app number (default: 1)
-# - `END`: Ending app number (required)
-# - `DIR`: Output directory (default: apps_output)
-# - `INSTALL`: Set to `1` to include the `--install` flag
-#
-# ### Examples
-#
-# **1. Build apps 1 to 10 into `my_apps` folder:**
-# ```bash
-# make build END=10 DIR=my_apps
-# ```
-#
-# **2. Build and install apps 1 to 5 into `test_install` folder:**
-# ```bash
-# make build END=5 DIR=test_install INSTALL=1
-# ```
-#
-# **3. Build apps 1 to 600 (Mass Generation):**
-# ```bash
-# make build END=600
-# ```
-#
-# **4. Clean up the output directory:**
-# ```bash
-# make clean DIR=my_apps
-# ```
-#
-# ## Targets
-#
-# - `build`: Executes the build script.
-# - `install`: Executes the build script with the `--install` flag.
-# - `clean`: Removes the specified output directory.
-
-PYTHON = python3
-SCRIPT = app_generator/build_app.py
+PYTHON ?= python3
+APKGEN = $(PYTHON) -m apkgen
 DIR ?= apps_output
 START ?= 1
 END ?= 1
 INSTALL ?= 0
+LAUNCH ?= 0
+WORKERS ?=
+KIND ?= all
+CONFIG ?=
 
-.PHONY: build install clean
+flag = $(if $(filter 1,$(1)),$(2))
+CONFIG_OPT = $(if $(CONFIG),--config '$(CONFIG)')
+COMMON = '$(DIR)' --start $(START) --end $(END) $(call flag,$(INSTALL),--install) \
+	$(call flag,$(LAUNCH),--launch) $(if $(WORKERS),--workers $(WORKERS)) $(CONFIG_OPT)
+
+.PHONY: build install uninstall doctor test clean
 
 build:
-	$(PYTHON) $(SCRIPT) $(DIR) --start $(START) --end $(END) $(if $(filter 1,$(INSTALL)),--install,)
+	$(APKGEN) normal $(COMMON)
 
 install:
-	$(PYTHON) $(SCRIPT) $(DIR) --start $(START) --end $(END) --install
+	$(APKGEN) normal $(COMMON) --install
 
+uninstall:
+	$(APKGEN) uninstall --kind $(KIND) $(CONFIG_OPT)
+
+doctor:
+	$(APKGEN) doctor $(CONFIG_OPT)
+
+test:
+	$(PYTHON) -m unittest discover -s tests -t . -v
+
+# Refuses the repository, $HOME, any directory containing either of them, and any directory
+# with a .git inside.
 clean:
-	rm -rf $(DIR)
+	@d=$$(realpath -m -- '$(DIR)') && [ -n "$$d" ] || { echo "refusing: cannot resolve DIR='$(DIR)'"; exit 1; }; \
+	for p in "$$(realpath .)" "$$(realpath -m -- "$$HOME")"; do \
+		case "$$p/" in "$${d%/}/"*) echo "refusing to delete '$(DIR)': it is or contains $$p"; exit 1;; esac; \
+	done
+	@if [ -e '$(DIR)/.git' ]; then echo "refusing to delete '$(DIR)': it contains .git"; exit 1; fi
+	rm -rf -- '$(DIR)'

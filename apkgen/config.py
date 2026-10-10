@@ -10,6 +10,7 @@ precedence for each key:
 
 ``resolve()`` checks everything up front and raises ``ConfigError`` listing every problem.
 """
+import importlib.util
 import os
 import re
 import shutil
@@ -82,12 +83,19 @@ def find_config(explicit=None, env=None):
             if not path.is_file():
                 raise ConfigError([f"config file given by {label} not found: {path}"], str(path))
             return str(path)
-    xdg = Path(env.get("XDG_CONFIG_HOME") or Path.home() / ".config")
-    for path in (Path.cwd() / LOCAL_CONFIG_NAME, REPO_ROOT / LOCAL_CONFIG_NAME,
-                 xdg / "apkgen" / "config.toml"):
+    xdg = Path(env.get("XDG_CONFIG_HOME") or _home(env) / ".config")
+    candidates = [Path.cwd() / LOCAL_CONFIG_NAME]
+    if (REPO_ROOT / "pyproject.toml").is_file():  # running from a source checkout
+        candidates.append(REPO_ROOT / LOCAL_CONFIG_NAME)
+    candidates.append(xdg / "apkgen" / "config.toml")
+    for path in candidates:
         if path.is_file():
             return str(path)
     return None
+
+
+def _home(env):
+    return Path(env.get("HOME") or Path.home())
 
 
 def _load_file(path):
@@ -99,6 +107,8 @@ def _load_file(path):
             data = tomllib.load(f)
     except tomllib.TOMLDecodeError as e:
         return {}, [f"{path}: invalid TOML: {e}"]
+    except UnicodeDecodeError as e:
+        return {}, [f"{path}: not valid UTF-8 (TOML files must be UTF-8): {e}"]
     except OSError as e:
         return {}, [f"{path}: cannot read: {e}"]
     problems = [f"{path}: unknown table or key '{k}' (expected a [toolchain] table)"
@@ -116,11 +126,20 @@ def _load_file(path):
         if not isinstance(value, str):
             problems.append(f"{path}: toolchain.{key} must be a string")
             continue
+        if not value.strip():
+            problems.append(f"{path}: toolchain.{key} is empty (remove the line to use the default)")
+            continue
         if key in PATH_KEYS:
-            p = Path(value).expanduser()
-            value = str(p if p.is_absolute() else base / p)
+            value = _rebase(value, base)
+        elif key == "keystore_pass" and value.startswith("file:"):
+            value = "file:" + _rebase(value[len("file:"):], base)
         values[key] = value
     return values, problems
+
+
+def _rebase(value, base):
+    p = Path(value).expanduser()
+    return str(p if p.is_absolute() else base / p)
 
 
 def _version_key(name):
@@ -163,69 +182,92 @@ class _Resolver:
         return None
 
 
-def _resolve(config_path, env, need_adb):
+def _resolve(config_path, env, need_adb, need_build=True):
+    """Return (toolchain, rows, problems). need_build=False only checks what adb needs."""
     r = _Resolver(config_path, env)
     problems = r.problems
     warnings = []
+    home = _home(env)
+
+    def problem(message, build=True):
+        if need_build or not build:
+            problems.append(message)
 
     def env_path(var, *parts):
         return str(Path(env[var], *parts)) if env.get(var) else None
 
-    default_sdk = Path.home() / "Android" / "Sdk"
+    default_sdk = home / "Android" / "Sdk"
     sdk = r.pick("sdk_dir", ("env ANDROID_HOME", env.get("ANDROID_HOME")),
                  ("env ANDROID_SDK_ROOT", env.get("ANDROID_SDK_ROOT")),
                  ("auto", str(default_sdk) if default_sdk.is_dir() else None))
     if sdk is None:
-        problems.append("Android SDK not found: set toolchain.sdk_dir or ANDROID_HOME")
+        problem("Android SDK not found: set toolchain.sdk_dir or ANDROID_HOME")
         sdk = ""
     elif not os.path.isdir(sdk):
-        problems.append(f"sdk_dir is not a directory: {sdk}")
+        problem(f"sdk_dir is not a directory: {sdk}")
 
     bt_version = r.pick("build_tools", ("auto", _newest_build_tools(sdk) if sdk else None))
     bt_dir = os.path.join(sdk, "build-tools", bt_version or "?")
-    if bt_version is None:
-        problems.append(f"no build-tools with {', '.join(BUILD_TOOLS)} found under {sdk}/build-tools")
     tools = {t: os.path.join(bt_dir, t) for t in BUILD_TOOLS}
-    if bt_version is not None:
-        problems += [f"{t} not found or not executable: {p}" for t, p in tools.items() if not _is_exe(p)]
+    if bt_version is None:
+        problem(f"no build-tools with {', '.join(BUILD_TOOLS)} found under {sdk}/build-tools")
+    else:
+        for t, p in tools.items():
+            if not _is_exe(p):
+                problem(f"{t} not found or not executable: {p}")
 
     platform = r.pick("platform", ("default", DEFAULT_PLATFORM))
     android_jar = os.path.join(sdk, "platforms", platform, "android.jar")
     if not os.path.isfile(android_jar):
-        problems.append(f"android.jar not found: {android_jar} "
-                        f"(install it with: sdkmanager \"platforms;{platform}\")")
+        problem(f"android.jar not found: {android_jar} (install it with: sdkmanager \"platforms;{platform}\")")
 
     javac = r.pick("javac", ("env JAVA_HOME", env_path("JAVA_HOME", "bin", "javac")),
                    ("auto", shutil.which("javac")))
     if not _is_exe(javac):
-        problems.append(f"javac not found or not executable: {javac}")
+        problem(f"javac not found or not executable: {javac}")
     # Look beside javac without resolving symlinks (distros route javac through wrapper scripts).
     beside = os.path.join(os.path.dirname(javac), "java") if javac else None
     java = r.pick("java", ("next to javac", beside if _is_exe(beside) else None),
                   ("env JAVA_HOME", env_path("JAVA_HOME", "bin", "java")),
                   ("auto", shutil.which("java")))
     if not _is_exe(java):
-        problems.append(f"java not found or not executable: {java} (needed by d8 and apksigner)")
+        problem(f"java not found or not executable: {java} (needed by d8 and apksigner)")
 
     zip_exe = r.pick("zip", ("auto", shutil.which("zip")))
     if not _is_exe(zip_exe):
-        problems.append(f"zip not found or not executable: {zip_exe}")
+        problem(f"zip not found or not executable: {zip_exe}")
 
     sdk_adb = os.path.join(sdk, "platform-tools", "adb")
     adb = r.pick("adb", ("auto", shutil.which("adb")), ("auto", sdk_adb if _is_exe(sdk_adb) else None))
-    if need_adb and not _is_exe(adb):
-        problems.append(f"adb not found or not executable: {adb} (needed for --install/--launch)")
+    if not _is_exe(adb):
+        if need_adb:
+            problem(f"adb not found or not executable: {adb}", build=False)
+        elif "adb" in r.file:
+            warnings.append(f"configured adb not found or not executable: {adb}")
 
-    keystore = r.pick("keystore", ("default", str(Path.home() / ".android" / "debug.keystore")))
+    keystore = r.pick("keystore", ("default", str(home / ".android" / "debug.keystore")))
     if not os.path.isfile(keystore):
-        problems.append(f"keystore not found: {keystore}")
+        problem(f"keystore not found: {keystore}")
     ks_pass = r.pick("keystore_pass", ("default", "pass:android"))
-    if not re.match(r"^(pass|env|file):", ks_pass):
-        problems.append("keystore_pass must use apksigner syntax: pass:..., env:VAR or file:PATH")
+    kind, sep, arg = ks_pass.partition(":")
+    if kind not in ("pass", "env", "file") or not sep:
+        problem("keystore_pass must use apksigner syntax: pass:<password>, env:<VAR> or file:<path>")
+    elif kind == "env" and not env.get(arg):
+        problem(f"keystore_pass: environment variable {arg} is not set")
+    elif kind == "file" and not os.path.isfile(arg):
+        problem(f"keystore_pass: password file not found: {arg}")
 
     font = r.pick("font", ("auto", next((f for f in FONT_CANDIDATES if os.path.isfile(f)), None)))
-    if "font" in r.file and not os.path.isfile(font):
-        problems.append(f"font not found: {font}")
+    if importlib.util.find_spec("PIL") is None:
+        problem("Pillow is not installed (pip install Pillow)")
+    elif font is not None and not os.path.isfile(font):
+        problem(f"font not found: {font}")
+    elif font is not None and need_build:
+        from .icons import load_font  # lazy: the check uses the same code path as rendering
+        try:
+            load_font(font, 256)
+        except OSError as e:
+            problem(f"font cannot be loaded: {font} ({e})")
     if font is None:
         warnings.append("no TrueType font found; icons use Pillow's built-in font")
 
@@ -237,7 +279,7 @@ def _resolve(config_path, env, need_adb):
 
 
 def resolve(config_path=None, *, need_adb=False, env=None):
-    """Resolve and validate the toolchain. Raises ConfigError listing every problem."""
+    """Resolve and validate the build toolchain. Raises ConfigError listing every problem."""
     env = os.environ if env is None else env
     path = find_config(config_path, env)
     tc, _rows, problems = _resolve(path, env, need_adb)
@@ -246,20 +288,32 @@ def resolve(config_path=None, *, need_adb=False, env=None):
     return tc
 
 
+def resolve_adb(config_path=None, *, env=None):
+    """Resolve only what device commands (uninstall, signal) need: a working adb."""
+    env = os.environ if env is None else env
+    path = find_config(config_path, env)
+    tc, _rows, problems = _resolve(path, env, need_adb=True, need_build=False)
+    if problems:
+        raise ConfigError(problems, path)
+    return tc
+
+
 def doctor_report(config_path=None, env=None):
-    """Return (lines, ok) describing every resolved value, its origin and status."""
+    """Return (lines, ok, toolchain) describing every resolved value, its origin and status."""
     env = os.environ if env is None else env
     try:
         path = find_config(config_path, env)
     except ConfigError as e:
-        return [str(e)], False
+        return [str(e)], False, None
     tc, rows, problems = _resolve(path, env, need_adb=False)
     lines = [f"config: {path or 'none (auto-detect)'}"]
     width = max(len(k) for k, _, _ in rows)
     for key, value, origin in rows:
+        if key == "keystore_pass" and value and value.startswith("pass:"):
+            value = "pass:***"
         lines.append(f"  {key:<{width}}  {value or '-'}  [{origin}]")
     lines.append(f"  {'build tools':<{width}}  {tc.build_tools_dir}")
     lines += [f"warning: {w}" for w in tc.warnings]
     lines += [f"PROBLEM: {p}" for p in problems]
     lines.append("OK" if not problems else f"{len(problems)} problem(s)")
-    return lines, not problems
+    return lines, not problems, tc
