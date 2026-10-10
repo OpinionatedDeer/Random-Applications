@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="${package}"
+    android:versionCode="1"
+    android:versionName="1.0">
+    <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="30" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <application
+        android:allowBackup="false"
+        android:icon="@drawable/icon_app"
+        android:label="@string/app_name"
+        android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar">
+        <meta-data android:name="iconswitch.app" android:value="${app}" />
+        <meta-data android:name="iconswitch.frames" android:value="${frames}" />
+        <meta-data android:name="iconswitch.interval_ms" android:value="${interval_ms}" />
+        <meta-data android:name="iconswitch.phase_ms" android:value="${phase_ms}" />
+        <meta-data android:name="iconswitch.wakeup" android:value="${wakeup}" />
+
+        <!-- The classes live in the shared runtime package ${rt}, not in the app's
+             package, so real components use fully qualified names. The target activity
+             must be declared before the aliases that point at it. -->
+        <activity
+            android:name="${rt}.EntryActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.NoDisplay" />
+        <activity
+            android:name="${rt}.MainActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:taskAffinity="${package}.dashboard" />
+
+        <!-- Exactly one alias is enabled at a time; its icon is the app's launcher icon. -->
+        <activity-alias
+            android:name=".IconInit"
+            android:targetActivity="${rt}.EntryActivity"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@drawable/icon_init"
+            android:label="@string/label_init">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+${aliases}
+        <receiver
+            android:name="${rt}.SwitchReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

@@ -1,5 +1,6 @@
 """adb helpers. Every call checks its result; nothing fails silently."""
 import os
+import re
 import shlex
 import subprocess
 
@@ -105,3 +106,37 @@ def uninstall_many(tc, packages, serial, chunk=200):
         removed += [p for p in batch if done.get(p) == "OK"]
         failed += [p for p in batch if done.get(p) != "OK"]
     return removed, failed
+
+
+def broadcast_many(tc, packages, receiver_class, am_args, serial, *, skip_stopped=False, chunk=100):
+    """Send an explicit broadcast to <package>/<receiver_class> for each package, batched in
+    device-side loops. Returns {package: result data ('' if none)} for every package whose
+    receiver answered; packages missing from the result got no reply.
+
+    Delivering a broadcast takes an app out of the stopped state (and on Android 15+ the system
+    then sends it BOOT_COMPLETED), so skip_stopped=True leaves force-stopped apps untouched and
+    reports them as STOPPED_REPLY instead; otherwise stopped apps are included (flag 0x20)."""
+    replies = {}
+    args = shlex.join((["-f", "0x20"] if not skip_stopped else []) + list(am_args))
+    done = re.compile(r'Broadcast completed: result=-?\d+(?:, data="(.*)")?')
+    check = ('if dumpsys package "$p" | grep -q " stopped=true"; then echo "@@STOPPED"; else %s; fi'
+             if skip_stopped else "%s")
+    packages = list(packages)
+    for start in range(0, len(packages), chunk):
+        batch = packages[start:start + chunk]
+        send = 'am broadcast -n "$p/%s" %s 2>&1' % (receiver_class, args)
+        # `; true`: one failing am must not abort the batch or discard the replies collected.
+        script = ('for p in %s; do echo "@@$p"; %s; done; true'
+                  % (" ".join(shlex.quote(p) for p in batch), check % send))
+        current = None
+        for line in shell(tc, script, serial).splitlines():
+            if line.startswith("@@STOPPED") and current:
+                replies[current] = STOPPED_REPLY
+            elif line.startswith("@@"):
+                current = line[2:].strip()
+            elif current and (m := done.search(line)):
+                replies[current] = m.group(1) or ""
+    return replies
+
+
+STOPPED_REPLY = "stopped (force-stopped: not switching; launch it or run `apkgen signal auto`)"

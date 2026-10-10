@@ -1,6 +1,7 @@
 """Build (and optionally install and launch) many apps of one kind in parallel."""
 import importlib
 import os
+import shlex
 import shutil
 import signal
 import sys
@@ -39,7 +40,7 @@ class Result:
     index: int
     package: str
     ok: bool
-    step: str                 # "build" | "install" | "launch" | "internal"; "done" when ok
+    step: str                 # "build" | "install" | "post-install" | "launch" | "internal"; "done" when ok
     message: str = ""
     launch: tuple[str, ...] | None = None
 
@@ -80,6 +81,9 @@ def _work(job):
         if job.install:
             step = "install"
             adb.install(job.tc, apk, job.serial)
+            step = "post-install"
+            for command in spec.post_install:
+                adb.shell(job.tc, shlex.join(command), job.serial, timeout=60)
         return Result(job.index, package, True, "done", launch=spec.launch)
     except (BuildError, AdbError) as e:
         return Result(job.index, package, False, step, str(e))
@@ -95,6 +99,8 @@ def _report(res, install):
         print(f"Successfully built{' and installed' if install else ''} {res.package}", flush=True)
     elif res.step == "install":
         print(f"Built {res.package} but install failed: {res.message}", flush=True)
+    elif res.step == "post-install":
+        print(f"Installed {res.package} but a post-install command failed: {res.message}", flush=True)
     else:
         print(f"Failed to build {res.package}: {res.message}", flush=True)
 

@@ -1,8 +1,12 @@
 # Android test-app generator. See README.md for details.
 #
 #   make build END=500 [START=1] [DIR=apps_output] [INSTALL=1] [LAUNCH=1] [WORKERS=8]
-#   make install END=5             build and install apps 1..5
-#   make uninstall [KIND=all]      remove generated apps from the device (normal|all)
+#              [LEGACY_ICONS=1]
+#   make install END=5             build and install normal apps 1..5
+#   make changing END=20 LAUNCH=1  icon-switching apps; also FRAMES=6 INTERVAL=60
+#                                  PHASE=sync|stagger LABEL_MODE=same|frame WAKEUP=1 WHITELIST=1
+#   make signal ACTION=switch INDEX=2   control installed switchers (switch|auto|stop|reset|status)
+#   make uninstall [KIND=all]      remove generated apps from the device (normal|changing|all)
 #   make doctor                    show and check the resolved toolchain
 #   make test                      run the unit tests
 #   make clean DIR=my_apps         delete an output directory (default DIR is apps_output!)
@@ -17,6 +21,15 @@ END ?= 1
 INSTALL ?= 0
 LAUNCH ?= 0
 WORKERS ?=
+LEGACY_ICONS ?= 0
+FRAMES ?= 6
+INTERVAL ?= 60
+PHASE ?= sync
+LABEL_MODE ?= same
+WAKEUP ?= 0
+WHITELIST ?= 0
+ACTION ?= status
+INDEX ?=
 KIND ?= all
 CONFIG ?=
 
@@ -25,13 +38,23 @@ CONFIG_OPT = $(if $(CONFIG),--config '$(CONFIG)')
 COMMON = '$(DIR)' --start $(START) --end $(END) $(call flag,$(INSTALL),--install) \
 	$(call flag,$(LAUNCH),--launch) $(if $(WORKERS),--workers $(WORKERS)) $(CONFIG_OPT)
 
-.PHONY: build install uninstall doctor test clean
+NORMAL_OPTS = $(call flag,$(LEGACY_ICONS),--legacy-icons)
+CHANGING_OPTS = --frames $(FRAMES) --interval $(INTERVAL) --phase $(PHASE) --label-mode $(LABEL_MODE) \
+	$(call flag,$(WAKEUP),--wakeup) $(call flag,$(WHITELIST),--whitelist)
+
+.PHONY: build install changing signal uninstall doctor test clean
 
 build:
-	$(APKGEN) normal $(COMMON)
+	$(APKGEN) normal $(COMMON) $(NORMAL_OPTS)
 
 install:
-	$(APKGEN) normal $(COMMON) --install
+	$(APKGEN) normal $(COMMON) $(NORMAL_OPTS) --install
+
+changing:
+	$(APKGEN) changing $(COMMON) $(CHANGING_OPTS)
+
+signal:
+	$(APKGEN) signal $(ACTION) $(if $(INDEX),--index $(INDEX)) $(CONFIG_OPT)
 
 uninstall:
 	$(APKGEN) uninstall --kind $(KIND) $(CONFIG_OPT)

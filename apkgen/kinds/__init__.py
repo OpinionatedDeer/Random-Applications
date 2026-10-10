@@ -8,4 +8,4 @@
     make_spec(i, opts, tc, prepared) -> ApkSpec; runs in a worker process
 """
 
-KINDS = ("normal",)
+KINDS = ("normal", "changing")

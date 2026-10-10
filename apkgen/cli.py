@@ -100,6 +100,50 @@ def cmd_uninstall(args):
     return 1 if failed else 0
 
 
+def cmd_signal(args):
+    changing = bulk.kind_module("changing")
+    if args.index is not None and args.action != "switch":
+        print("apkgen: --index only applies to 'switch'", file=sys.stderr)
+        return 2
+    if args.index is not None and args.index < 0:
+        print("apkgen: --index must be 0 or more", file=sys.stderr)
+        return 2
+    tc = _toolchain(args, adb_only=True)
+    if tc is None:
+        return 2
+    serial = _device(tc, args.serial)
+    if serial is None:
+        return 2
+    rx = re.compile(re.escape(changing.PACKAGE_PREFIX) + r"(\d+)")
+    try:
+        targets = sorted((int(m.group(1)), p) for p in adb.list_packages(tc, serial)
+                         if (m := rx.fullmatch(p)))
+        targets = [(n, p) for n, p in targets
+                   if (args.start is None or n >= args.start) and (args.end is None or n <= args.end)]
+        if not targets:
+            print("No installed icon-switching apps match.")
+            return 1
+        am_args = ["-a", changing.ACTION_PREFIX + args.action.upper()]
+        if args.index is not None:
+            am_args += ["--ei", "index", str(args.index)]
+        replies = adb.broadcast_many(tc, [p for _, p in targets],
+                                     f"{changing.RUNTIME_PKG}.SwitchReceiver", am_args, serial,
+                                     skip_stopped=args.action == "status")
+    except AdbError as e:
+        print(f"apkgen: adb: {e}", file=sys.stderr)
+        return 1
+    silent = errors = 0
+    for _, package in targets:
+        reply = replies.get(package)
+        if not reply:
+            silent += 1
+        elif reply.startswith("ERROR"):
+            errors += 1
+        print(f"{package}: {reply or 'no reply'}")
+    print(f"{len(targets) - silent - errors} ok, {errors} errors, {silent} without reply")
+    return 1 if silent or errors else 0
+
+
 def _common(parser):
     parser.add_argument("--config", help="toolchain config file (default: config.local.toml lookup)")
 
@@ -129,6 +173,19 @@ def make_parser():
     p = sub.add_parser("doctor", help="show the resolved toolchain and check it")
     _common(p)
     p.set_defaults(func=cmd_doctor)
+
+    p = sub.add_parser("signal", help="control installed icon-switching apps",
+                       description="Send a control broadcast to every installed icon-switching app "
+                                   "(or a range) and print each app's status reply.")
+    p.add_argument("action", choices=bulk.kind_module("changing").SIGNAL_ACTIONS,
+                   help="switch: hold a frame (--index K, default: next frame); auto: resume the "
+                        "clock; stop: hold the current frame; reset: back to INIT; status: report")
+    p.add_argument("--index", type=int, help="frame to hold with 'switch' (0 .. frames-1)")
+    p.add_argument("--start", type=int, help="first app number (default: all installed)")
+    p.add_argument("--end", type=int, help="last app number (default: all installed)")
+    p.add_argument("--serial", help="adb device serial (default: $ANDROID_SERIAL or the only device)")
+    _common(p)
+    p.set_defaults(func=cmd_signal)
 
     p = sub.add_parser("uninstall", help="remove generated apps from the device")
     p.add_argument("--kind", choices=KINDS + ("all",), default="all", help="which apps to remove (default: all)")

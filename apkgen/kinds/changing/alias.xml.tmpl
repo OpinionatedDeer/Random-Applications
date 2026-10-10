@@ -1,0 +1,12 @@
+        <activity-alias
+            android:name=".Icon${k}"
+            android:targetActivity="${rt}.EntryActivity"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@drawable/icon_${k}"
+            android:label="@string/label_${k}">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>

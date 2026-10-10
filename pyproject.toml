@@ -18,3 +18,4 @@ include = ["apkgen*"]
 
 [tool.setuptools.package-data]
 "*" = ["*.tmpl"]
+"apkgen.kinds.changing" = ["java/**/*.java"]

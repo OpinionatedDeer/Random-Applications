@@ -56,7 +56,7 @@ class NormalKindTemplates(unittest.TestCase):
         tc = SimpleNamespace(font=None)
         for i in (1, 255, 1000):
             with self.subTest(app=i):
-                spec = normal.make_spec(i, normal.Options(), tc)
+                spec = normal.make_spec(i, normal.Options(legacy_icons=True), tc)
                 java, manifest, strings = legacy_texts(f"com.test.app.app{i}", f"Test App {i}")
                 self.assertEqual(spec.package, f"com.test.app.app{i}")
                 self.assertEqual(spec.manifest, manifest)
@@ -64,6 +64,15 @@ class NormalKindTemplates(unittest.TestCase):
                 self.assertEqual(spec.java_sources[f"com/test/app/app{i}/MainActivity.java"], java)
                 self.assertEqual(set(spec.resources), {"values/strings.xml", "drawable/ic_launcher.png"})
                 self.assertTrue(spec.resources["drawable/ic_launcher.png"].startswith(b"\x89PNG"))
+
+    def test_default_icon_goes_to_xxxhdpi(self):
+        tc = SimpleNamespace(font=None)
+        legacy = normal.make_spec(7, normal.Options(legacy_icons=True), tc)
+        spec = normal.make_spec(7, normal.Options(), tc)
+        self.assertEqual(set(spec.resources), {"values/strings.xml", "drawable-xxxhdpi/ic_launcher.png"})
+        self.assertEqual(spec.resources["drawable-xxxhdpi/ic_launcher.png"],
+                         legacy.resources["drawable/ic_launcher.png"])
+        self.assertEqual((spec.manifest, spec.java_sources), (legacy.manifest, legacy.java_sources))
 
 
 def legacy_icon(n, font_path):
@@ -92,6 +101,21 @@ class NormalIcon(unittest.TestCase):
         img = Image.open(io.BytesIO(icons.render_number_icon(300, None)))
         self.assertEqual(img.size, (512, 512))
         self.assertEqual(img.getpixel((2, 2)), (300 % 255, 300 * 7 % 255, 300 * 13 % 255))
+
+
+class ChangingIcons(unittest.TestCase):
+    def test_long_numbers_fit(self):
+        img = Image.new("RGB", (512, 512))
+        draw = ImageDraw.Draw(img)
+        for text in ("7", "1234", "1234567"):
+            font = icons._fitted_font(draw, text, FONT, 240, 330, 8)
+            bbox = draw.textbbox((0, 0), text, font=font, stroke_width=8)
+            self.assertLessEqual(bbox[2] - bbox[0], 330, text)
+
+    def test_frame_icons_render(self):
+        for frame in range(3):
+            png = icons.render_frame_icon(1234567, frame, 3, FONT)
+            self.assertEqual(Image.open(io.BytesIO(png)).size, (512, 512))
 
 
 class Substitution(unittest.TestCase):

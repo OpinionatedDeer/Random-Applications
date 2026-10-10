@@ -35,6 +35,7 @@ class ApkSpec:
     java_sources: Mapping[str, str] = field(default_factory=dict)  # path under src/ -> text
     dex: str | None = None                        # prebuilt classes.dex used instead of java_sources
     launch: tuple[str, ...] | None = None         # arguments for `adb shell am start -W`
+    post_install: tuple[tuple[str, ...], ...] = ()  # device shell commands run after installing
 
 
 def _die_with_parent():
