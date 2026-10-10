@@ -1,0 +1,45 @@
+# Machine-specific toolchain settings for the APK generator.
+#
+#   cp config.example.toml config.local.toml    # config.local.toml is gitignored
+#
+# Every key is optional. For each key the first source that provides a value wins:
+#   1. this file
+#   2. environment: ANDROID_HOME / ANDROID_SDK_ROOT (sdk_dir), JAVA_HOME (javac, java)
+#   3. auto-detection / defaults (shown below)
+#
+# The config file itself is looked up in this order:
+#   --config PATH  >  $APKGEN_CONFIG  >  ./config.local.toml  >  <repo>/config.local.toml
+#   >  $XDG_CONFIG_HOME/apkgen/config.toml  >  none (auto-detect everything)
+#
+# "~" is expanded; relative paths are resolved against this file's directory.
+# Pinning build_tools and platform keeps generated APKs identical when newer SDK
+# packages are installed later.
+
+[toolchain]
+# Android SDK root. Default: ~/Android/Sdk if it exists.
+# sdk_dir = "~/Android/Sdk"
+
+# Build-tools version under <sdk_dir>/build-tools/. Default: newest version that
+# contains aapt2, d8, zipalign and apksigner.
+# build_tools = "36.0.0"
+
+# Platform whose android.jar is compiled against. Default: android-30.
+# Not auto-detected on purpose: it must match targetSdkVersion in the templates.
+# platform = "android-30"
+
+# JDK tools. Default: $JAVA_HOME/bin, then PATH. java defaults to the one next to javac.
+# javac = "/usr/bin/javac"
+# java = "/usr/bin/java"
+
+# Other tools. Default: found on PATH (adb also falls back to <sdk_dir>/platform-tools).
+# zip = "/usr/bin/zip"
+# adb = "/usr/bin/adb"
+
+# APK signing key. Default: the standard Android debug keystore.
+# keystore_pass uses apksigner syntax: "pass:<password>", "env:<VAR>" or "file:<path>".
+# keystore = "~/.android/debug.keystore"
+# keystore_pass = "pass:android"
+
+# Bold TrueType font for the numbers drawn on icons.
+# Default: Liberation Sans Bold or DejaVu Sans Bold from common distro locations.
+# font = "/usr/share/fonts/liberation-fonts/LiberationSans-Bold.ttf"

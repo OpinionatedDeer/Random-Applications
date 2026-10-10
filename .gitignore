@@ -1,0 +1,25 @@
+# Generated APKs and build scratch space
+/apps_output/
+*.apk
+*.idsig
+tmp_*/
+.apkgen-tmp-*/
+
+# Machine-specific configuration (see config.example.toml)
+/config.local.toml
+
+# Personal tool settings
+/.pi/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+/build/
+/dist/
+.venv/
+venv/
+
+# Android / Gradle leftovers
+.gradle/
+local.properties
